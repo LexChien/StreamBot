@@ -15,6 +15,11 @@
 - 檢查 m3u8 是否為 media playlist，並判斷是否可直接下載
 - 下載無加密 m3u8 串流為 mp4 檔案（需安裝 ffmpeg）
 - 友善命令列互動，下載進度與錯誤提示
+- 顯示所有可選畫質
+- 錯誤重試
+- 日誌記錄
+- Master Playlist 指向多種解析度
+- Media Playlist 真正列出 .ts 檔案
 
 ---
 

@@ -8,6 +8,7 @@ from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urljoin
 
 # --- 設定區 ---
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36"
@@ -44,35 +45,85 @@ def validate_m3u8(url):
     try:
         headers = {"User-Agent": UA, "Referer": REFERER}
         resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            if is_valid_m3u8(resp.text):
-                return "media", resp.text
-            elif "#EXT-X-STREAM-INF" in resp.text:
-                return "master", resp.text
-            else:
-                return "invalid", resp.text
-        else:
+        if resp.status_code != 200:
             return "error", f"HTTP {resp.status_code}"
+        text = resp.text
+        # Case 1: media playlist（可以直接下載）
+        if is_valid_m3u8(text):
+            return "media", text
+        # Case 2: master playlist（多解析度）
+        elif "#EXT-X-STREAM-INF" in text:
+            lines = text.splitlines()
+            stream_info = []
+
+            for i, line in enumerate(lines):
+                if line.startswith("#EXT-X-STREAM-INF"):
+                    bw_match = re.search(r'BANDWIDTH=(\d+)', line)
+                    res_match = re.search(r'RESOLUTION=(\d+x\d+)', line)
+                    next_line = lines[i + 1].strip() if i + 1 < len(lines) else None
+                    if bw_match and next_line:
+                        stream_info.append({
+                            "bandwidth": int(bw_match.group(1)),
+                            "resolution": res_match.group(1) if res_match else "N/A",
+                            "raw_path": next_line,
+                            "full_url": urljoin(url, next_line)
+                        })
+            if stream_info:
+                # 🎞️ 顯示所有畫質選項
+                print("🎞️ 偵測到多畫質選項：\n")
+                sorted_info = sorted(stream_info, key=lambda x: -x["bandwidth"])
+                for idx, stream in enumerate(sorted_info, start=1):
+                    print(f"{idx}. {stream['bandwidth'] // 1000} kbps | {stream['resolution']} → {stream['raw_path']}")
+
+                # 🔀 選最高畫質（最大 bandwidth）
+                best_stream = sorted_info[0]
+                print(f"\n🔀 自動選擇最高畫質：{best_stream['full_url']}")
+                return validate_m3u8(best_stream["full_url"])
+
+            return "master", text
+        # Case 3: 非法 m3u8
+        else:
+            return "invalid", text
     except Exception as e:
         return "error", str(e)
 
 def download_with_ffmpeg(url, output):
     print(f"⏬ 開始下載：{output}")
+    log_path = Path(str(output)).with_suffix(".log")
     cmd = [
         FFMPEG_BIN,
         "-user_agent", UA,
         "-referer", REFERER,
         "-http_persistent", "false",
+        "-timeout", "10000000",
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "5",
+        "-err_detect", "ignore_err",
         "-i", url,
         "-c", "copy",
-        output
+        str(output)
     ]
     print("執行指令：", " ".join(cmd))
-    try:
-        subprocess.run(cmd, check=True)
-        print("✅ ffmpeg 下載成功\n")
-    except subprocess.CalledProcessError as e:
-        print("❌ ffmpeg 下載失敗:", e)
+    with open(log_path, "w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            universal_newlines=True
+        )
+
+        for line in iter(process.stdout.readline, ''):
+            print(line, end='')          # 即時顯示在畫面上
+            log_file.write(line)         # 同時寫入 log 檔
+        process.stdout.close()
+        returncode = process.wait()
+
+        if returncode == 0:
+            print(f"\n✅ ffmpeg 下載成功，log 已儲存：{log_path}\n")
+        else:
+            print(f"\n❌ ffmpeg 下載失敗，請查看 log：{log_path}\n")
 
 def process_video_url(driver, video_url):
     m3u8_url, headers = detect_m3u8(driver, video_url)
