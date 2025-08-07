@@ -4,6 +4,8 @@
 
 `gimy.py` 是一個自動化工具，專為 Gimy 影片網站設計，能夠自動偵測影片頁面中的 m3u8 串流地址，並利用 ffmpeg 下載無加密的影片檔案。此腳本結合 Selenium Wire、requests 及 ffmpeg，適合需要批量下載或分析 Gimy 串流的開發者與研究者。
 
+`slideshare.py` 下載 slideshare 簡報，抓取 2048 高畫質圖片，傳存成 PDF 檔案
+
 ---
 
 ## 功能特色
